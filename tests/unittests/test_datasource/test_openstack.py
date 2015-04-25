@@ -255,7 +255,7 @@ class TestOpenStackDataSource(test_helpers.HttprettyTestCase):
         self.assertEquals(EC2_META, ds_os.ec2_metadata)
         self.assertEquals(USER_DATA, ds_os.userdata_raw)
         self.assertEquals(2, len(ds_os.files))
-        self.assertEquals(VENDOR_DATA, ds_os.vendordata_pure)
+        self.assertEquals(VENDOR_DATA, json.loads(ds_os.vendordata_raw))
         self.assertEquals(ds_os.vendordata_raw, None)
 
     @hp.activate

@@ -38,8 +38,8 @@ VALID_DSMODES = ("local", "net", "pass", "disabled")
 FS_TYPES = ('vfat', 'iso9660')
 LABEL_TYPES = ('config-2',)
 POSSIBLE_MOUNTS = ('sr', 'cd')
-OPTICAL_DEVICES = tuple(('/dev/%s%s' % (z, i) for z in POSSIBLE_MOUNTS
-                  for i in range(0, 2)))
+OPTICAL_DEVICES = tuple(
+    ('/dev/%s%s' % (z, i) for z in POSSIBLE_MOUNTS for i in range(0, 2)))
 
 
 class DataSourceConfigDrive(openstack.SourceMixin, sources.DataSource):
@@ -137,12 +137,16 @@ class DataSourceConfigDrive(openstack.SourceMixin, sources.DataSource):
         self.files.update(results.get('files', {}))
 
         vd = results.get('vendordata')
-        self.vendordata_pure = vd
-        try:
-            self.vendordata_raw = openstack.convert_vendordata_json(vd)
-        except ValueError as e:
-            LOG.warn("Invalid content in vendor-data: %s", e)
-            self.vendordata_raw = None
+        if isinstance(vd, dict):
+            if 'cloud-init' in vd:
+                self.vendordata_raw = vd['cloud-init']
+            else:
+                self.vendordata_pure = vd
+                try:
+                    self.vendordata_raw = openstack.convert_vendordata_json(vd)
+                except ValueError as e:
+                    LOG.warn("Invalid content in vendor-data: %s", e)
+                    self.vendordata_raw = None
 
         return True
 
@@ -209,8 +213,20 @@ def on_first_boot(data, distro=None):
     if not isinstance(data, dict):
         raise TypeError("Config-drive data expected to be a dict; not %s"
                         % (type(data)))
+    networkapplied = False
+    jsonnet_conf = data.get('vendordata', {}).get('network_info')
+    if jsonnet_conf:
+        try:
+            LOG.debug("Updating network interfaces from JSON in config drive")
+            distro_user_config = distro.apply_network_json(jsonnet_conf)
+            networkapplied = True
+        except NotImplementedError:
+            LOG.debug(
+                "Distro does not implement networking setup via Vendor JSON.")
+            pass
+
     net_conf = data.get("network_config", '')
-    if net_conf and distro:
+    if networkapplied is False and net_conf and distro:
         LOG.debug("Updating network interfaces from config drive")
         distro.apply_network(net_conf)
     files = data.get('files', {})
