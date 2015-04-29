@@ -21,6 +21,7 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 from cloudinit import distros
+from cloudinit.distros.net_util import NetConfHelper
 from cloudinit import helpers
 from cloudinit import log as logging
 from cloudinit import util
@@ -62,6 +63,134 @@ class Distro(distros.Distro):
 
     def install_packages(self, pkglist):
         self.package_command('install', pkgs=pkglist)
+
+    def _rhel_network_json(self, settings):
+        devs = []
+        # depends add redhat-lsb-core
+        nc = NetConfHelper(settings)
+        iffn = '/etc/sysconfig/network-scripts/ifcfg-{0}'
+        routefn = '/etc/sysconfig/network-scripts/route-{0}'
+        files = {}
+
+        bonds = nc.get_links_by_type('bond')
+        for bond in bonds:
+            chunk = []
+            fn = iffn.format(bond['id'])
+            lines = []
+            lines.append("# Created by cloud-init on instance boot.")
+            lines.append("#")
+            lines.append("")
+            lines.append("DEVICE={0}".format(bond['id']))
+            devs.append(bond['id'])
+            lines.append("ONBOOT=yes")
+            lines.append("BOOTPROTO=none")
+            lines.append("USERCTL=no")
+            lines.append("NM_CONTROLLED=no")
+            lines.append("TYPE=Ethernet")
+
+            opts = []
+            if 'bond_mode' in bond:
+                opts.append('mode={0}'.format(bond['bond_mode']))
+            if 'bond_xmit_hash_policy' in bond:
+                opts.append(
+                    'xmit_hash_policy={0}'.format(
+                        bond['bond_xmit_hash_policy']))
+            if 'bond_miimon' in bond:
+                opts.append('miimon={0}'.format(bond['bond_miimon']))
+            lines.append("BONDING_OPTS=\"{0}\"".format(" ".join(opts)))
+            files[fn] = "\n".join(lines)
+
+            for slave in bond['bond_links']:
+                slavelink = nc.get_link_by_name(slave)
+                slavedev = nc.get_link_devname(slavelink)
+                fn = iffn.format(slavedev)
+                lines = []
+                lines.append("# Created by cloud-init on instance boot.")
+                lines.append("#")
+                lines.append("")
+                lines.append("DEVICE={0}".format(slavedev))
+                devs.append(slavedev)
+                lines.append("ONBOOT=yes")
+                lines.append("BOOTPROTO=none")
+                lines.append("USERCTL=no")
+                lines.append("NM_CONTROLLED=no")
+                lines.append("TYPE=Ethernet")
+                lines.append("MASTER={0}".format(bond['id']))
+                lines.append("SLAVE=yes")
+                files[fn] = "\n".join(lines)
+
+        dns = nc.get_dns_servers()
+        networks = nc.get_networks()
+        for net in networks:
+            # only have support for ipv4 so far.
+            if net['type'] != "ipv4":
+                continue
+
+            link = nc.get_link_by_name(net['link'])
+            devname = nc.get_link_devname(link)
+            fn = iffn.format(devname)
+
+            lines = []
+            lines.append("# Created by cloud-init on instance boot.")
+            lines.append("#")
+            lines.append("# network: {0}".format(net['id']))
+            lines.append("# network_id: {0}".format(net['network_id']))
+            lines.append("")
+            lines.append("DEVICE={0}".format(devname))
+            devs.append(devname)
+            if link['type'] == "vlan":
+                lines.append("VLAN=yes")
+                lines.append(
+                    "PHYSDEV={0}".format(devname[:devname.rfind('.')]))
+                lines.append(
+                    "MACADDR={0}".format(link['ethernet_mac_address']))
+                if 'mtu' in link:
+                    chunk.append('MTU={0}'.format(link['mtu']))
+
+            lines.append("ONBOOT=yes")
+            lines.append("BOOTPROTO=static")
+            lines.append("USERCTL=no")
+            lines.append("NM_CONTROLLED=no")
+            lines.append("TYPE=Ethernet")
+            lines.append("IPADDR={0}".format(net['ip_address']))
+            lines.append("NETMASK={0}".format(net['netmask']))
+
+            gwroute = [
+                route for route in net['routes']
+                if route['network'] == '0.0.0.0']
+            # TODO: hmmm
+            if len(gwroute) == 1:
+                lines.append("GATEWAY={0}".format(gwroute[0]['gateway']))
+                i = 1
+                for server in dns:
+                    lines.append("DNS{0}={1}".format(i, server))
+                    i = 1
+
+            files[fn] = "\n".join(lines)
+
+            i = 0
+            fn = routefn.format(devname)
+            lines = []
+            for route in net['routes']:
+                if route['network'] == '0.0.0.0':
+                    continue
+                lines.append("ADDRESS{0}={1}".format(i, route['network']))
+                lines.append("NETMASK{0}={1}".format(i, route['netmask']))
+                lines.append("GATEWAY{0}={1}".format(i, route['gateway']))
+                i = 1
+
+            if len(lines) > 0:
+                lines.insert(0, "#")
+                lines.insert(0, "# Created by cloud-init on instance boot.")
+                files[fn] = "\n".join(lines)
+
+        return files, devs
+
+    def _write_network_json(self, settings):
+        files, devs = self._rhel_network_json(settings)
+        for (fn, data) in files.iteritems():
+            util.write_file(fn, data)
+        return devs
 
     def _write_network(self, settings):
         # TODO(harlowja) fix this... since this is the ubuntu format
@@ -116,6 +245,7 @@ class Distro(distros.Distro):
         (dist, vers) = util.system_info()['dist'][:2]
         major = (int)(vers.split('.')[0])
         return ((dist.startswith('Red Hat Enterprise Linux') and major >= 7)
+                or (dist.startswith('CentOS Linux') and major >= 7)
                 or (dist.startswith('Fedora') and major >= 18))
 
     def apply_locale(self, locale, out_fn=None):
@@ -221,3 +351,4 @@ class Distro(distros.Distro):
     def update_package_sources(self):
         self._runner.run("update-sources", self.package_command,
                          ["makecache"], freq=PER_INSTANCE)
+

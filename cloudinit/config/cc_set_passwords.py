@@ -104,10 +104,11 @@ def handle(_name, cfg, cloud, log, args):
     change_pwauth = False
     pw_auth = None
     if 'ssh_pwauth' in cfg:
-        change_pwauth = True
+        if cfg['ssh_pwauth'] not in [None, '', 'unchanged']:
+            change_pwauth = True
         if util.is_true(cfg['ssh_pwauth']):
             pw_auth = 'yes'
-        if util.is_false(cfg['ssh_pwauth']):
+        elif util.is_false(cfg['ssh_pwauth']):
             pw_auth = 'no'
 
     if change_pwauth:

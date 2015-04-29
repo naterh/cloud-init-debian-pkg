@@ -231,6 +231,25 @@ def route_pformat():
     return "\n".join(lines)
 
 
+_SECTIONS_RE = re.compile(r"\n(?=\w)")
+_IFCONFIG_RE = re.compile(
+    r"^(?P<name>\w+).*?(?:HWaddr|ether) (?P<mac>[a-fA-F0-9:]+)", re.DOTALL)
+
+
+def _parse_ifconfig_output(stdout):
+    result = {}
+    for section in _SECTIONS_RE.split(stdout):
+        match = _IFCONFIG_RE.match(section)
+        if match:
+            result[match.group("name")] = match.group("mac").lower()
+    return result
+
+
+def find_mac_addresses():
+    (output, err) = util.subp(["ifconfig", "-a"])
+    return _parse_ifconfig_output(output)
+
+
 def debug_info(prefix='ci-info: '):
     lines = []
     netdev_lines = netdev_pformat().splitlines()
@@ -246,3 +265,4 @@ def debug_info(prefix='ci-info: '):
     else:
         lines.extend(route_lines)
     return "\n".join(lines)
+

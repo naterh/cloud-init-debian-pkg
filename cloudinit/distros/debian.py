@@ -23,6 +23,7 @@
 import os
 
 from cloudinit import distros
+from cloudinit.distros.net_util import NetConfHelper
 from cloudinit import helpers
 from cloudinit import log as logging
 from cloudinit import util
@@ -71,6 +72,106 @@ class Distro(distros.Distro):
     def install_packages(self, pkglist):
         self.update_package_sources()
         self.package_command('install', pkgs=pkglist)
+
+    def _debian_network_json(self, settings):
+        devs = []
+        nc = NetConfHelper(settings)
+        lines = []
+
+        lines.append("# Created by cloud-init on instance boot.")
+        lines.append("#")
+        lines.append(
+            "# This file describes the network interfaces available on your "
+            "system")
+        lines.append(
+            "# and how to activate them. For more information, see "
+            "interfaces(5).")
+        lines.append("")
+        lines.append("# The loopback network interface")
+        lines.append("auto lo")
+        lines.append("iface lo inet loopback")
+        lines.append("")
+
+        bonds = nc.get_links_by_type('bond')
+        for bond in bonds:
+            chunk = []
+            slaves = [
+                nc.get_link_devname(nc.get_link_by_name(x)) for x in bond[
+                    'bond_links']]
+            for slave in [x for x in slaves if not x.startswith('eth')]:
+                chunk.append("auto {0}".format(slave))
+                chunk.append("iface {0} inet manual".format(slave))
+                chunk.append("  bond-master {0}".format(bond['id']))
+                chunk.append("")
+            devs.append(bond['id'])
+            devs.extend(slaves)
+            chunk.append("auto {0}".format(bond['id']))
+            chunk.append("iface {0} inet manual".format(bond['id']))
+            if 'bond_mode' in bond:
+                chunk.append('  bond-mode {0}'.format(bond['bond_mode']))
+            if 'bond_xmit_hash_policy' in bond:
+                chunk.append('  bond_xmit_hash_policy {0}'.format(bond[
+                    'bond_xmit_hash_policy']))
+            if 'bond_miimon' in bond:
+                chunk.append('  bond-miimon {0}'.format(bond['bond_miimon']))
+            chunk.append('  bond-slaves {0}'.format(' '.join(slaves)))
+            chunk.append("")
+            lines.extend(chunk)
+
+        dns = nc.get_dns_servers()
+        networks = nc.get_networks()
+        for net in networks:
+            # only have support for ipv4 so far.
+            if net['type'] != "ipv4":
+                continue
+
+            link = nc.get_link_by_name(net['link'])
+            devname = nc.get_link_devname(link)
+            chunk = []
+            chunk.append("# network: {0}".format(net['id']))
+            chunk.append("# network_id: {0}".format(net['network_id']))
+            chunk.append("auto {0}".format(devname))
+            chunk.append("iface {0} inet static".format(devname))
+
+            devs.append(devname)
+            if link['type'] == "vlan":
+                chunk.append("  vlan_raw_device {0}".format(
+                    devname[:devname.rfind('.')]))
+                chunk.append("  hwaddress ether {0}".format(
+                    link['ethernet_mac_address']))
+                if 'mtu' in link:
+                    chunk.append('  mtu {0}'.format(link['mtu']))
+
+            chunk.append("  address {0}".format(net['ip_address']))
+            chunk.append("  netmask {0}".format(net['netmask']))
+            gwroute = [
+                route for route in net['routes']
+                if route['network'] == '0.0.0.0']
+            # TODO: hmmm
+            if len(gwroute) == 1:
+                chunk.append("  gateway {0}".format(gwroute[0]['gateway']))
+                chunk.append("  dns-nameservers {0}".format(" ".join(dns)))
+
+            for route in net['routes']:
+                if route['network'] == '0.0.0.0':
+                    continue
+                chunk.append(
+                    "  post-up route add -net {0} netmask {1} gw {2} || true"
+                    .format(route['network'], route['netmask'],
+                            route['gateway']))
+                chunk.append(
+                    "  pre-down route del -net {0} netmask {1} gw {2} || true"
+                    .format(route['network'], route['netmask'],
+                            route['gateway']))
+            chunk.append("")
+            lines.extend(chunk)
+        return {'/etc/network/interfaces': "\n".join(lines)}, devs
+
+    def _write_network_json(self, settings):
+        files, devs = self._debian_network_json(settings)
+        for (fn, data) in files.items():
+            util.write_file(fn, data)
+        return devs
 
     def _write_network(self, settings):
         util.write_file(self.network_conf_fn, settings)
@@ -181,3 +282,4 @@ def _get_wrapper_prefix(cmd, mode):
         return cmd
     else:
         return []
+

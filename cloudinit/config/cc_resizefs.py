@@ -165,7 +165,8 @@ def handle(name, cfg, _cloud, log, args):
             util.log_time, logfunc=log.debug, msg="backgrounded Resizing",
             func=do_resize, args=(resize_cmd, log))
     else:
-        util.log_time(logfunc=log.debug, msg="Resizing",
+        util.log_time(
+            logfunc=log.debug, msg="Resizing",
             func=do_resize, args=(resize_cmd, log))
 
     action = 'Resized'
@@ -183,3 +184,4 @@ def do_resize(resize_cmd, log):
         raise
     # TODO(harlowja): Should we add a fsck check after this to make
     # sure we didn't corrupt anything?
+

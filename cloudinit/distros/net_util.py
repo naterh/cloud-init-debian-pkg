@@ -19,7 +19,7 @@
 #
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
+from cloudinit.netinfo import find_mac_addresses
 
 # This is a util function to translate debian based distro interface blobs as
 # given in /etc/network/interfaces to an *somewhat* agnostic format for
@@ -78,6 +78,7 @@
 #         "gateway": "10.0.0.2"
 #     }
 # }
+
 
 def translate_network(settings):
     # Get the standard cmd, args from the ubuntu format
@@ -180,3 +181,39 @@ def translate_network(settings):
         if cmd == 'iface' and 'inet6' in args:
             real_ifaces[dev_name]['inet6'] = True
     return real_ifaces
+
+
+class NetConfHelper(object):
+    def __init__(self, settings):
+        self._settings = settings
+
+    def get_link_by_name(self, name):
+        return [x for x in self._settings['links'] if x['id'] == name][0]
+
+    def get_links_by_type(self, t):
+        return [x for x in self._settings['links'] if x['type'] == t]
+
+    def get_link_devname(self, link):
+        # TODO: chase vlans/bonds/etc
+        if link['type'] == "vlan":
+            return "{0}.{1}".format(
+                self.get_link_devname(
+                    self.get_link_by_name(link['vlan_link'])),
+                link['vlan_id'])
+        if link['type'] == "ethernet":
+            devs = find_mac_addresses()
+            for (dev, mac) in devs.items():
+                if mac == link['ethernet_mac_address']:
+                    return dev
+            raise Exception("Device not found: {0}".format(link))
+
+        return link['id']
+
+    def get_networks(self):
+        return self._settings['networks']
+
+    def get_dns_servers(self):
+        return [
+            x['address'] for x in self._settings['services']
+            if x['type'] == "dns"]
+
