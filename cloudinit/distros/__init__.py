@@ -74,12 +74,6 @@ class Distro(object):
         # to write this blob out in a distro format
         raise NotImplementedError()
 
-    #@abc.abstractmethod
-    def _write_network_json(self, settings):
-        # In the future use the http://fedorahosted.org/netcf/
-        # to write this blob out in a distro format
-        raise NotImplementedError()
-
     def _find_tz_file(self, tz):
         tz_file = os.path.join(self.tz_zone_dir, str(tz))
         if not os.path.isfile(tz_file):
@@ -122,12 +116,6 @@ class Distro(object):
         arch_info = self._get_arch_package_mirror_info(arch)
         return _get_package_mirror_info(availability_zone=availability_zone,
                                         mirror_info=arch_info)
-
-    def apply_network_json(self, settings, bring_up=True):
-        dev_names = self._write_network_json(settings)
-        if bring_up:
-            return self._bring_up_interfaces(dev_names)
-        return False
 
     def apply_network(self, settings, bring_up=True):
         # Write it out
@@ -220,6 +208,15 @@ class Distro(object):
                                   and sys_hostname != hostname):
             update_files.append(sys_fn)
 
+        # If something else has changed the hostname after we set it
+        # initially, we should not overwrite those changes (we should
+        # only be setting the hostname once per instance)
+        if (sys_hostname and prev_hostname and
+                sys_hostname != prev_hostname):
+            LOG.info("%s differs from %s, assuming user maintained hostname.",
+                       prev_hostname_fn, sys_fn)
+            return
+
         # Remove duplicates (incase the previous config filename)
         # is the same as the system config filename, don't bother
         # doing it twice
@@ -233,11 +230,6 @@ class Distro(object):
             except IOError:
                 util.logexc(LOG, "Failed to write hostname %s to %s", hostname,
                             fn)
-
-        if (sys_hostname and prev_hostname and
-                sys_hostname != prev_hostname):
-            LOG.debug("%s differs from %s, assuming user maintained hostname.",
-                       prev_hostname_fn, sys_fn)
 
         # If the system hostname file name was provided set the
         # non-fqdn as the transient hostname.
@@ -330,6 +322,7 @@ class Distro(object):
             "gecos": '--comment',
             "homedir": '--home',
             "primary_group": '--gid',
+            "uid": '--uid',
             "groups": '--groups',
             "passwd": '--password',
             "shell": '--shell',
