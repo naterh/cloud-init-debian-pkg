@@ -60,6 +60,9 @@ class Distro(distros.Distro):
         # should only happen say once per instance...)
         self._runner = helpers.Runners(paths)
         self.osfamily = 'redhat'
+        if os.path.exists("/run/systemd/system"):
+            self.init_cmd = "systemctl"
+            cfg['ssh_svcname'] = 'sshd.service'
 
     def install_packages(self, pkglist):
         self.package_command('install', pkgs=pkglist)

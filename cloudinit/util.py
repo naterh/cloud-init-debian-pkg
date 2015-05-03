@@ -62,6 +62,15 @@ from cloudinit import version
 from cloudinit.settings import (CFG_BUILTIN)
 
 
+if sys.version_info[:2] >= (3, 0):
+    DIR_MODE = 0o755
+    FILE_MODE = 0o644
+    LFILE_MODE = 0o600
+else:
+    DIR_MODE = 0755
+    FILE_MODE = 0644
+    LFILE_MODE = 0600
+
 _DNS_REDIRECT_IP = None
 LOG = logging.getLogger(__name__)
 
@@ -1354,7 +1363,7 @@ def rename(src, dest):
     os.rename(src, dest)
 
 
-def ensure_dirs(dirlist, mode=0o755):
+def ensure_dirs(dirlist, mode=DIR_MODE):
     for d in dirlist:
         ensure_dir(d, mode)
 
@@ -1368,7 +1377,7 @@ def read_write_cmdline_url(target_fn):
             return
         try:
             if key and content:
-                write_file(target_fn, content, mode=0o600)
+                write_file(target_fn, content, mode=LFILE_MODE)
                 LOG.debug(("Wrote to %s with contents of command line"
                           " url %s (len=%s)"), target_fn, url, len(content))
             elif key and not content:
@@ -1593,7 +1602,7 @@ def append_file(path, content):
     write_file(path, content, omode="ab", mode=None)
 
 
-def ensure_file(path, mode=0o644):
+def ensure_file(path, mode=FILE_MODE):
     write_file(path, content='', omode="ab", mode=mode)
 
 
@@ -1611,7 +1620,7 @@ def chmod(path, mode):
             os.chmod(path, real_mode)
 
 
-def write_file(filename, content, mode=0o644, omode="wb"):
+def write_file(filename, content, mode=FILE_MODE, omode="wb"):
     """
     Writes a file with the given content and sets the file mode as specified.
     Resotres the SELinux context if possible.
@@ -2198,3 +2207,4 @@ def message_from_string(string):
     if sys.version_info[:2] < (2, 7):
         return email.message_from_file(six.StringIO(string))
     return email.message_from_string(string)
+
