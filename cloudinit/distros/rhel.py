@@ -50,6 +50,7 @@ class Distro(distros.Distro):
     hostname_conf_fn = "/etc/sysconfig/network"
     systemd_hostname_conf_fn = "/etc/hostname"
     network_script_tpl = '/etc/sysconfig/network-scripts/ifcfg-%s'
+    route_script_tpl = '/etc/sysconfig/network-scripts/route-%s'
     resolve_conf_fn = "/etc/resolv.conf"
     tz_local_fn = "/etc/localtime"
     usr_lib_exec = "/usr/libexec"
@@ -126,9 +127,14 @@ class Distro(distros.Distro):
         dns = nc.get_dns_servers()
         networks = nc.get_networks()
         for net in networks:
-            # only have support for ipv4 so far.
+            # Updated to support ipv6
             if net['type'] != "ipv4":
-                continue
+                net_cfg = {
+                    'NETWORKING': _make_sysconfig_bool(True),
+                }
+                net_cfg['NETWORKING_IPV6'] = _make_sysconfig_bool(True)
+                net_cfg['IPV6_AUTOCONF'] = _make_sysconfig_bool(False)
+                rhel_util.update_sysconfig_file(self.network_conf_fn, net_cfg)
 
             link = nc.get_link_by_name(net['link'])
             devname = nc.get_link_devname(link)
@@ -156,12 +162,18 @@ class Distro(distros.Distro):
             lines.append("USERCTL=no")
             lines.append("NM_CONTROLLED=no")
             lines.append("TYPE=Ethernet")
-            lines.append("IPADDR={0}".format(net['ip_address']))
-            lines.append("NETMASK={0}".format(net['netmask']))
+            if net['type'] == "ipv4":
+                lines.append("IPADDR={0}".format(net['ip_address']))
+                lines.append("NETMASK={0}".format(net['netmask']))
+            else:
+                lines.append("IPV6INIT={0}".format(_make_sysconfig_bool(True)))
+                lines.append("IPV6ADDR={0}".format(net['ip_address']))
+                lines.append("IPV6_DEFAULTGW={0}".format(net['routes'][0].get(
+                    'gateway')))
 
             gwroute = [
                 route for route in net['routes']
-                if route['network'] == '0.0.0.0']
+                if route['network'] != '0.0.0.0']
             # TODO: hmmm
             if len(gwroute) == 1:
                 lines.append("GATEWAY={0}".format(gwroute[0]['gateway']))
@@ -176,7 +188,7 @@ class Distro(distros.Distro):
             fn = routefn.format(devname)
             lines = []
             for route in net['routes']:
-                if route['network'] == '0.0.0.0':
+                if route['network'] in ['0.0.0.0', '::']:
                     continue
                 lines.append("ADDRESS{0}={1}".format(i, route['network']))
                 lines.append("NETMASK{0}={1}".format(i, route['netmask']))
