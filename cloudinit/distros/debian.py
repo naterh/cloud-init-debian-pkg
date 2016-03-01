@@ -121,9 +121,10 @@ class Distro(distros.Distro):
         dns = nc.get_dns_servers()
         networks = nc.get_networks()
         for net in networks:
-            # only have support for ipv4 so far.
+            # added for v6 static support
+            use_ipv6 = False
             if net['type'] != "ipv4":
-                continue
+                use_ipv6 = True
 
             link = nc.get_link_by_name(net['link'])
             devname = nc.get_link_devname(link)
@@ -131,7 +132,10 @@ class Distro(distros.Distro):
             chunk.append("# network: {0}".format(net['id']))
             chunk.append("# network_id: {0}".format(net['network_id']))
             chunk.append("auto {0}".format(devname))
-            chunk.append("iface {0} inet static".format(devname))
+            if not use_ipv6:
+                chunk.append("iface {0} inet static".format(devname))
+            else:
+                chunk.append("iface {0} inet6 static".format(devname))
 
             devs.append(devname)
             if link['type'] == "vlan":
@@ -143,17 +147,21 @@ class Distro(distros.Distro):
                     chunk.append('  mtu {0}'.format(link['mtu']))
 
             chunk.append("  address {0}".format(net['ip_address']))
-            chunk.append("  netmask {0}".format(net['netmask']))
+            if not use_ipv6:
+                chunk.append("  netmask {0}".format(net['netmask']))
+            else:
+                chunk.append("  netmask 64")
             gwroute = [
                 route for route in net['routes']
                 if route['network'] == '0.0.0.0']
             # TODO: hmmm
             if len(gwroute) == 1:
                 chunk.append("  gateway {0}".format(gwroute[0]['gateway']))
-                chunk.append("  dns-nameservers {0}".format(" ".join(dns)))
+                if not use_ipv6:
+                    chunk.append("  dns-nameservers {0}".format(" ".join(dns)))
 
             for route in net['routes']:
-                if route['network'] == '0.0.0.0':
+                if route['network'] in ['0.0.0.0', '::']:
                     continue
                 chunk.append(
                     "  post-up route add -net {0} netmask {1} gw {2} || true"
